@@ -1,9 +1,11 @@
 # 第7章 vLLM 核心技术：PagedAttention 与连续批处理
- 本章大纲：
+##  本章大纲：
+
  - 熟练掌握连续批处理
  - 熟练掌握Pageattention
 
-作业：
+## 作业：
+
 - 回顾连续批处理和pageattention机制
 # 7.1 引言：大模型推理的性能瓶颈
 
