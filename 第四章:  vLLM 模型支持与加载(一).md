@@ -1,5 +1,16 @@
 # 第四章 vLLM 模型支持与加载
-
+##本章课程目标
+- 掌握vLLM支持的模型
+- 了解vLLM支持这些模型的原因
+- 掌握模型下载
+- 掌握通过vllm加载本地模型
+- 掌握模型格式
+## 作业
+- 注册huggingface账户
+- 下载量化模型到/data/model目录下
+- 通过vllm 加载下载的模型并把日志保存到/var/log/vllm.log
+- 通过curl访问并保存结果到/data/result/curl.txt
+  
 vLLM 作为高性能大模型推理引擎，核心优势之一是具备广泛的模型兼容性与灵活的加载机制，可适配不同模态、不同架构的主流大模型，同时支持多种加载方式与自定义适配，满足各类部署场景需求。本章将围绕模型实现方式、模型加载方法、支持模型列表及推理模型支持四大核心板块，结合官网规范与实操细节，系统讲解 vLLM 模型支持与加载的全流程。
 
 # 4.1 模型实现方式（Model Implementation）
@@ -8,14 +19,14 @@ vLLM 对模型的支持通过两种核心实现方式完成，兼顾推理性能
 
 ## 4.1.1 vLLM 原生实现
 
-vLLM 原生实现的模型，是官方专门为 vLLM 推理引擎优化开发的，其核心代码存放于 `vllm/model_executor/models` 目录下。这类模型深度适配 vLLM 的核心优化特性（如 PagedAttention 内存管理、连续批处理、CUDA 图优化等），能最大限度发挥 GPU 性能，实现高吞吐量、低延迟的推理效果，是生产环境中优先选择的实现方式[superscript:3]。
+vLLM 原生实现的模型，是专门为 vLLM 推理引擎优化开发的，其核心代码存放于 `vllm/model_executor/models` 目录下。这类模型深度适配 vLLM 的核心优化特性（如 PagedAttention 内存管理、连续批处理、CUDA 图优化等），能最大限度发挥 GPU 性能，实现高吞吐量、低延迟的推理效果，是生产环境中优先选择的实现方式.
 
 原生实现的模型涵盖纯文本、多模态等各类主流架构，后续 4.3 节支持模型列表中，所有标注为“原生支持”的模型均采用该实现方式，无需额外配置即可享受完整优化。
 
 ## 4.1.2 Transformers 后端
 
-为兼容更多未被 vLLM 原生支持的模型，vLLM 提供了 Transformers 后端支持功能，可直接调用 Hugging Face Transformers 库中的模型实现，无需对模型进行额外适配。官方测试表明，只要模型兼容，使用 Transformers 后端的推理性能与 vLLM 原生实现的差异极小（小于 1%），可满足对性能要求不极致、但需兼容多类模型的场景[superscript:3]。
-
+为兼容更多未被 vLLM 原生支持的模型，vLLM 提供了 Transformers 后端支持功能，可直接调用 Hugging Face Transformers 库中的模型实现，无需对模型进行额外适配。
+通过自定义模型实现和注意力后端，在模型加载过程中透明地注入 PagedAttention 支持，从而让任何被支持的 Hugging Face 模型都能获得高性能推理。
 目前，Transformers 后端支持的范围明确，覆盖以下核心类别：
 
 - 模态：纯文本模型、嵌入模型、视觉-语言模型（仅支持图像输入，视频输入支持正在规划中）；
@@ -24,7 +35,7 @@ vLLM 原生实现的模型，是官方专门为 vLLM 推理引擎优化开发的
 
 - 注意力类型：全注意力（Full Attention）和/或滑动注意力（Sliding Attention）。
 
-可通过极简代码验证模型是否使用 Transformers 后端[superscript:3]：
+可通过极简代码验证模型是否使用 Transformers 后端：
 
 ```python
 from vllm import LLM
@@ -36,8 +47,6 @@ if __name__ == "__main__":
 
 ```
 
-
-
 若模型存在 vLLM 原生实现，也可强制使用 Transformers 后端：离线推理时设置 `model_impl="transformers"`；在线服务时添加命令行参数 `--model-impl transformers。
 
 # 4.2 如何加载模型（Loading a Model）
@@ -46,7 +55,7 @@ vLLM 提供灵活的模型加载方式，默认支持从 Hugging Face Hub 加载
 
 ## 4.2.1 从 Hugging Face Hub 加载（默认方式）
 
-默认情况下，vLLM 会从 Hugging Face Hub 自动拉取模型，只需指定模型名称即可完成加载，模型下载后会自动缓存至本地，后续加载无需重复下载[superscript:3]。
+默认情况下，vLLM 会从 Hugging Face Hub 自动拉取模型，只需指定模型名称即可完成加载，模型下载后会自动缓存至本地，后续加载无需重复下载。
 
 判断模型是否支持该方式加载，核心方法是检查 Hugging Face 模型仓库中的 `config.json` 文件：查看文件中 `"architectures"` 字段的值，若该值在 vLLM 官方支持的架构列表中（详见 4.3 节），则模型理论上可被原生支持，直接加载即可使用[superscript:3]。
 
@@ -95,7 +104,7 @@ hf scan-cache --dir ~/.cache/huggingface/hub
 
 ## 4.2.3 加载自定义模型
 
-即使模型不在 vLLM 官方支持列表中，只要满足 Transformers 规范与 vLLM 兼容性要求，即可通过 Transformers 后端在 vLLM 中运行，核心只需设置 `trust_remote_code=True` 即可启用远程代码加载[superscript:3]。
+即使模型不在 vLLM 官方支持列表中，只要满足 Transformers 规范与 vLLM 兼容性要求，即可通过 Transformers 后端在 vLLM 中运行，核心只需设置 `trust_remote_code=True` 即可启用远程代码加载。
 
 自定义模型需满足的核心条件：
 
